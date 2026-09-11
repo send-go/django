@@ -34,4 +34,12 @@ from .conf import get_client
 client = SimpleLazyObject(get_client)
 
 __all__ = ["get_client", "client"]
-__version__ = "1.0.0"
+
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    # 버전은 pyproject.toml 이 단일 출처다. 여기에 값을 또 적으면 릴리스마다
+    # 두 곳을 맞춰야 하고, 실제로 1.0.0 에 머물러 있었다.
+    __version__ = _pkg_version("sendgo-django")
+except PackageNotFoundError:  # 설치되지 않은 소스 트리에서 import 한 경우
+    __version__ = "0.0.0.dev0"

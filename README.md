@@ -293,7 +293,103 @@ A. 네, `Django>=4.2`를 지원합니다.
 사용 예시와 파라미터는 [코어 README](https://github.com/send-go) 와
 [SDK 가이드](https://sendgo.io/ko/sdk) 를 참고하세요.
 
+## 관리 API — 채널·템플릿·발신번호 등록 (v2 전용)
+
+코어(`sendgo-python`)의 관리 서비스가 `client` 프록시에 그대로 붙어 있습니다.
+콘솔에서만 되던 등록·심사를 뷰나 관리 명령에서 처리할 수 있습니다.
+
+| 접근 | 하는 일 | 계정 |
+| --- | --- | --- |
+| `.kakao_senders` | 카카오 채널 인증·등록·동기화, 브랜드메시지 M/N 신청 | 기업 |
+| `.notice_templates` | 알림톡 템플릿 CRUD, 검수 요청·취소, 승인 취소, 휴면 해제 | 기업 |
+| `.brand_templates` | 브랜드메시지 템플릿 CRUD, 동기화, 가져오기 | 기업 |
+| `.sender_registration` | 발신번호 등록 신청, 중복 확인, 유형 안내 | 개인·기업 |
+| `.message_templates` | 문자 상용구 템플릿 CRUD | 개인·기업 |
+| `.kakao_images` | 카카오 이미지 업로드 — 템플릿용 URL 발급 | 기업 |
+| `.rejected_numbers` | 수신거부(080) 번호 조회 | 개인·기업 |
+| `.webhook` | 이벤트 웹훅 구독 — 심사 결과 수신 | 개인·기업 |
+
+> **sendgo.io 콘솔에 들어올 일이 없습니다.** 휴대폰 발신번호는 PASS 대신
+> 신분증 사본을 받아 sendgo 운영자가 대신 심사합니다. 사람이 개입하는 지점은
+> 카카오 채널 인증번호 하나뿐이고, 그것도 여러분 화면에서 입력받으면 됩니다.
+> 심사가 붙는 것들은 비동기라 웹훅으로 결과를 받으세요.
+
+```python
+# views.py — 카카오 채널 등록 2단계
+from sendgo_django import client
+
+
+def request_channel_code(request):
+    # 카카오가 관리자 휴대폰으로 인증번호를 SMS 발송한다 (응답에 번호는 없다)
+    client.kakao_senders.request_token(
+        request.POST["yellow_id"],
+        request.POST["phone"],
+    )
+    return JsonResponse({"message": "인증번호를 발송했습니다."})
+
+
+def complete_channel(request):
+    created = client.kakao_senders.create(
+        token=request.POST["code"],            # 사용자가 문자로 받은 인증번호
+        yellow_id=request.POST["yellow_id"],
+        phone_number=request.POST["phone"],
+        category_code="001001",
+    )
+    return JsonResponse(created["data"]["sender"])
+```
+
+```python
+# management/commands/provision_templates.py
+from django.core.management.base import BaseCommand
+from sendgo_django import client
+
+
+class Command(BaseCommand):
+    help = "표준 알림톡 템플릿을 등록하고 검수를 요청한다"
+
+    def handle(self, *args, **options):
+        created = client.notice_templates.create(
+            kakao_sender_key=options["kakao_sender_key"],
+            template_name="주문 접수 안내",
+            template_content="#{name}님, 주문 #{orderNo}이 접수되었습니다.",
+            template_message_type="BA",
+            template_emphasize_type="NONE",
+            category_code="001001",
+            message_purpose="order_delivery",
+            legal_basis="transaction",
+            benefit_origin="none",
+            expiry_type="none",
+        )
+
+        code = created["data"]["template"]["templateCode"]
+        client.notice_templates.request_inspection(code)
+
+        # 검수는 30분~1영업일 걸린다. 여기서 기다리지 말고 Celery beat 나
+        # cron 으로 sync() 를 돌려 inspectionStatus 가 APR 이 되는지 확인한다.
+        self.stdout.write(self.style.SUCCESS(f"검수 요청 완료: {code}"))
+```
+
+전체 파라미터는 [sendgo-python README](https://github.com/send-go/python) 를 참고하세요.
+
+---
+
 ## 변경 사항
+
+### 1.3.0 (2026-09-11)
+
+- **관리 API 노출** — 코어 1.3.0 의 `kakao_senders` · `notice_templates` ·
+  `brand_templates` · `sender_registration` · `message_templates` 를
+  `sendgo_django.client` 에서 그대로 쓸 수 있습니다. 콘솔에서만 되던 채널 등록,
+  알림톡 템플릿 검수 요청, 발신번호 심사 접수를 뷰나 관리 명령에서 처리합니다.
+- **`__version__` 이 `1.0.0` 에 멈춰 있던 것을 고쳤습니다.** 이제 설치된 패키지
+  메타데이터에서 읽으므로 pyproject.toml 이 단일 출처입니다.
+- `sendgo-python` 을 `>=1.3` 으로 올렸습니다.
+- **이벤트 웹훅** 추가 — 발신번호 승인, 알림톡 검수 결과, 채널 차단,
+  브랜드메시지 타겟팅 결과를 구독해 받습니다. 서명은 받은 원본 바이트로
+  검증합니다(SDK 에 검증 헬퍼 포함).
+- **카카오 이미지 업로드** 추가 — 브랜드메시지 템플릿의 `imageUrl` 은 카카오가
+  호스팅하는 URL 이어야 하는데, 그 URL 을 얻는 길이 콘솔에만 있었습니다.
+- **수신거부(080) 조회** 추가 — 자기 DB 의 수신 상태를 맞출 수 있습니다.
 
 ### 1.2.1 (2026-08-14)
 
