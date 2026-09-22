@@ -9,7 +9,7 @@ from typing import Optional
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
-from sendgo import Sendgo
+from sendgo import Sendgo, AccountClient
 
 # 기본값
 DEFAULT_API_VERSION = "v2"
@@ -60,3 +60,12 @@ def reset() -> None:
     """메모이즈된 클라이언트를 초기화합니다. (주로 테스트용)"""
     global _client
     _client = None
+
+
+def get_account_client() -> AccountClient:
+    """발송용 키 없이 SENDGO.AGENT_TOKEN으로 계정 클라이언트를 만듭니다."""
+    config = _get_settings()
+    token = config.get("AGENT_TOKEN")
+    if not token:
+        raise ImproperlyConfigured("settings.SENDGO에 AGENT_TOKEN을 지정하세요.")
+    return AccountClient(agent_token=token, base_url=config.get("BASE_URL", DEFAULT_BASE_URL))

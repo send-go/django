@@ -27,13 +27,15 @@ Django 프로젝트에서 Sendgo 코어(`sendgo-python`)를 손쉽게 사용할 
 
 from django.utils.functional import SimpleLazyObject
 
-from .conf import get_client
+from .conf import get_client, get_account_client
 
 # 설정이 없어도 임포트 자체는 실패하지 않도록, 실제 접근 시점에만
 # get_client()를 호출하는 지연 프록시를 제공합니다.
 client = SimpleLazyObject(get_client)
 
-__all__ = ["get_client", "client"]
+from sendgo import AccountClient
+
+__all__ = ["get_account_client", "AccountClient", "get_client", "client"]
 
 try:
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
